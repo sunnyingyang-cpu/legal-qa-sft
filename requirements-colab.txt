@@ -1,0 +1,9 @@
+llamafactory>=0.9.1
+rouge-chinese
+sacrebleu
+jieba
+bert-score
+huggingface_hub
+llama-cpp-python
+gradio
+openai
