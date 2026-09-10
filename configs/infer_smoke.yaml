@@ -1,0 +1,22 @@
+### 冒烟推理：验证 do_predict → generated_predictions.jsonl → metrics.py 链路
+### 运行：llamafactory-cli train configs/infer_smoke.yaml
+
+model_name_or_path: Qwen/Qwen2.5-0.5B-Instruct
+adapter_name_or_path: saves/smoke-0.5b
+finetuning_type: lora
+template: qwen
+
+predict_with_generate: true
+do_predict: true
+dataset: legal_qa_test
+dataset_dir: data
+cutoff_len: 1024
+max_samples: 30
+max_new_tokens: 512
+temperature: 0.1
+top_p: 0.9
+per_device_eval_batch_size: 8
+fp16: true
+
+output_dir: results/smoke-0.5b
+report_to: none

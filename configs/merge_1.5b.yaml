@@ -1,0 +1,12 @@
+### 阶段 5｜LoRA 合并回基座，得到可独立部署的完整模型
+### 运行：llamafactory-cli export configs/merge_1.5b.yaml
+
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+adapter_name_or_path: saves/qwen2.5-1.5b-lora
+finetuning_type: lora
+template: qwen
+
+export_dir: models/qwen2.5-1.5b-legal-merged
+export_size: 2
+export_device: cpu
+export_legacy_format: false

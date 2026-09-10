@@ -1,0 +1,19 @@
+### 阶段 4｜基座 zero-shot 基线（与 infer_1.5b 唯一区别：无 adapter）
+### 运行：llamafactory-cli train configs/infer_baseline_1.5b.yaml
+
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+template: qwen
+
+predict_with_generate: true
+do_predict: true
+dataset: legal_qa_test
+dataset_dir: data
+cutoff_len: 1024
+max_new_tokens: 512
+temperature: 0.1
+top_p: 0.9
+per_device_eval_batch_size: 8
+fp16: true
+
+output_dir: results/base-1.5b
+report_to: none

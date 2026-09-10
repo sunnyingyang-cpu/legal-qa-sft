@@ -1,0 +1,38 @@
+### 阶段 3｜正式训练：Qwen2.5-1.5B LoRA（T4 约 30-40 分钟）
+### bf16 LoRA，不量化；r=32/alpha=64，target all
+### 运行：llamafactory-cli train configs/train_1.5b.yaml
+
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+
+stage: sft
+do_train: true
+do_eval: true
+finetuning_type: lora
+lora_target: all
+lora_rank: 32
+lora_alpha: 64
+lora_dropout: 0.1
+
+dataset: legal_qa_train
+eval_dataset: legal_qa_val
+dataset_dir: data
+template: qwen
+cutoff_len: 1024
+preprocessing_num_workers: 8
+
+output_dir: saves/qwen2.5-1.5b-lora
+logging_steps: 20
+save_strategy: epoch
+eval_strategy: epoch
+plot_loss: true
+
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 2.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+fp16: true            # T4 不支持 bf16，务必 fp16
+bf16: false
+gradient_checkpointing: true
+report_to: none

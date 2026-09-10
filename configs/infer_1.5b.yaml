@@ -1,0 +1,21 @@
+### 阶段 4｜微调后模型批量推理（300 条测试集，T4 约 15-20 分钟）
+### 运行：llamafactory-cli train configs/infer_1.5b.yaml
+
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+adapter_name_or_path: saves/qwen2.5-1.5b-lora
+finetuning_type: lora
+template: qwen
+
+predict_with_generate: true
+do_predict: true
+dataset: legal_qa_test
+dataset_dir: data
+cutoff_len: 1024
+max_new_tokens: 512
+temperature: 0.1
+top_p: 0.9
+per_device_eval_batch_size: 8
+fp16: true
+
+output_dir: results/ft-1.5b
+report_to: none
