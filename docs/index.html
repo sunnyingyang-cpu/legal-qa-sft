@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YYJ · 法律问答 LoRA 微调 — 从数据构建到量化部署</title>
+<meta name="description" content="在单张 T4 上微调 Qwen2.5-1.5B 构建中文法律问答助手：双层引用评测体系，引用格式合规 56.3%→97.0%，事实正确率 2.3%→67.5%，GGUF 量化 1.6GB 部署。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23e5484d'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='serif' font-weight='700'%3E%E5%BC%95%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0b0e14; --bg2:#0d1119; --surface:#12172233; --card:#121826;
+  --line:#1f2736; --line2:#2a3346;
+  --text:#e9ecf3; --muted:#9aa4b5; --dim:#6b7688;
+  --red:#e5484d; --red2:#ff6b6f; --red-soft:rgba(229,72,77,.12);
+  --gold:#d9a441; --green:#4cc38a; --gray-bar:#2c3547;
+  --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans SC","Microsoft YaHei","Segoe UI",sans-serif;
+  --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,"Courier New",monospace;
+  --max:1120px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.75;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--red);color:#fff}
+
+/* ---------- 顶部进度条 ---------- */
+#progress{position:fixed;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,var(--red),var(--gold));z-index:99;transition:width .1s linear}
+
+/* ---------- 导航 ---------- */
+nav{position:fixed;top:0;left:0;right:0;z-index:90;backdrop-filter:blur(14px);
+  background:rgba(11,14,20,.78);border-bottom:1px solid var(--line)}
+.nav-in{max-width:var(--max);margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:14px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14.5px;letter-spacing:.02em}
+.seal-mini{width:26px;height:26px;border:2px solid var(--red);border-radius:6px;color:var(--red);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;
+  font-family:var(--mono);transform:rotate(-4deg);flex:none}
+.nav-links{margin-left:auto;display:flex;gap:22px;font-size:13px;color:var(--muted)}
+.nav-links a{color:var(--muted);text-decoration:none;transition:color .2s}
+.nav-links a:hover{color:var(--text)}
+.nav-gh{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);
+  border:1px solid var(--line2);border-radius:8px;padding:5px 12px;text-decoration:none;transition:.2s}
+.nav-gh:hover{border-color:var(--red);color:var(--red2)}
+@media(max-width:860px){.nav-links{display:none}}
+
+/* ---------- 通用 ---------- */
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+section{padding:96px 0;scroll-margin-top:70px;position:relative}
+section:nth-of-type(even){background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--red);
+  text-transform:uppercase;display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--red)}
+h2{font-size:clamp(26px,4vw,38px);font-weight:700;letter-spacing:.01em;line-height:1.3;margin-bottom:14px}
+.lead{color:var(--muted);font-size:16.5px;max-width:760px;margin-bottom:44px}
+.lead b,.lead strong{color:var(--text);font-weight:600}
+.en{font-family:var(--mono);color:var(--dim);font-size:.72em;letter-spacing:.14em;font-weight:400}
+.grid{display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px;
+  transition:border-color .25s,transform .25s}
+.card:hover{border-color:var(--line2);transform:translateY(-2px)}
+.mono{font-family:var(--mono)}
+.note{font-size:13px;color:var(--dim);line-height:1.7}
+.divider{height:1px;background:var(--line);margin:44px 0}
+
+/* ---------- Hero ---------- */
+.hero{min-height:100svh;display:flex;flex-direction:column;justify-content:center;position:relative;
+  padding:130px 0 70px;overflow:hidden}
+.hero-bg-cite{position:absolute;top:0;bottom:0;right:4%;display:flex;gap:52px;opacity:.05;pointer-events:none;
+  font-family:var(--mono);font-size:15px;writing-mode:vertical-rl;color:var(--text);white-space:nowrap}
+.hero-glow{position:absolute;width:820px;height:520px;top:-220px;left:-260px;pointer-events:none;
+  background:radial-gradient(closest-side,rgba(229,72,77,.14),transparent 70%)}
+.hero-grid-bg{position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:64px 64px;mask-image:radial-gradient(ellipse 90% 70% at 35% 35%,#000 30%,transparent 75%)}
+.hero-eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.24em;color:var(--red);margin-bottom:22px;
+  display:flex;align-items:center;gap:12px}
+.hero-eyebrow::before{content:"";width:34px;height:1px;background:var(--red)}
+h1{font-size:clamp(32px,5.6vw,58px);font-weight:800;line-height:1.22;letter-spacing:.01em;max-width:860px}
+h1 .hl{color:var(--red2)}
+.hero-sub{margin-top:22px;color:var(--muted);font-size:clamp(15px,1.6vw,17.5px);max-width:720px}
+.hero-sub code{font-family:var(--mono);font-size:.88em;color:var(--text);background:var(--surface);
+  border:1px solid var(--line);border-radius:5px;padding:1px 7px}
+.hero-chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.chip{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line2);
+  border-radius:999px;padding:4px 13px;background:var(--surface)}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:56px}
+.metric{background:linear-gradient(180deg,var(--card),#0f141f);border:1px solid var(--line);
+  border-radius:14px;padding:22px 22px 18px;position:relative;overflow:hidden}
+.metric::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--red),transparent 70%);opacity:0;transition:opacity .3s}
+.metric:hover::before{opacity:1}
+.metric .num{font-family:var(--mono);font-size:clamp(28px,3.2vw,40px);font-weight:700;
+  color:var(--text);font-variant-numeric:tabular-nums;line-height:1.1}
+.metric .num small{font-size:.5em;color:var(--red2);font-weight:600}
+.metric .lab{margin-top:8px;font-size:14px;color:var(--text);font-weight:600}
+.metric .delta{margin-top:5px;font-family:var(--mono);font-size:12px;color:var(--dim)}
+.metric .delta b{color:var(--green);font-weight:600}
+@media(max-width:900px){.metrics{grid-template-columns:repeat(2,1fr)}}
+.scroll-hint{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);color:var(--dim);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.2em;display:flex;flex-direction:column;
+  align-items:center;gap:8px;animation:bob 2.2s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translate(-50%,0)}50%{transform:translate(-50%,7px)}}
+
+/* ---------- §01 决策对比 ---------- */
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:860px){.vs{grid-template-columns:1fr}}
+.vs-card{border-radius:14px;padding:26px;border:1px solid var(--line);background:var(--card)}
+.vs-card.win{border-color:rgba(229,72,77,.45);background:linear-gradient(180deg,rgba(229,72,77,.06),var(--card));
+  box-shadow:0 0 0 1px rgba(229,72,77,.14),0 18px 50px -30px rgba(229,72,77,.35)}
+.vs-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+.vs-head .t{font-size:19px;font-weight:700}
+.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;padding:3px 10px;border-radius:999px}
+.tag.adopt{background:var(--red);color:#fff}
+.tag.ref{background:var(--surface);color:var(--dim);border:1px solid var(--line2)}
+.vs-sub{font-size:13px;color:var(--dim);margin-bottom:18px}
+.vs-row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;
+  border-top:1px solid var(--line);font-size:14px}
+.vs-row .k{color:var(--muted)}
+.vs-row .v{font-family:var(--mono);font-size:13.5px}
+.vs-row .v.good{color:var(--red2);font-weight:700}
+.vs-row .v.bad{color:var(--dim)}
+.verdict{margin-top:26px;border-left:2px solid var(--red);padding:14px 22px;background:var(--red-soft);
+  border-radius:0 10px 10px 0;font-size:15px}
+.verdict b{color:var(--red2)}
+
+/* ---------- §02 流水线 ---------- */
+.pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:960px){.pipe{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.pipe{grid-template-columns:1fr}}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;position:relative}
+.stage .no{font-family:var(--mono);font-size:11px;color:var(--red);letter-spacing:.18em;margin-bottom:12px}
+.stage .t{font-size:16.5px;font-weight:700;margin-bottom:9px}
+.stage ul{list-style:none}
+.stage li{font-size:13px;color:var(--muted);padding:3.5px 0;display:flex;gap:8px}
+.stage li::before{content:"›";color:var(--red);font-family:var(--mono);flex:none}
+.diag{margin-top:20px;display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+@media(max-width:860px){.diag{grid-template-columns:1fr}}
+.diag-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px}
+.diag-card h4{font-size:15px;margin-bottom:4px}
+.diag-card .sub{font-size:12.5px;color:var(--dim);font-family:var(--mono);margin-bottom:14px}
+.kv{display:flex;justify-content:space-between;font-size:13.5px;padding:9px 0;border-top:1px solid var(--line)}
+.kv .k{color:var(--muted)}.kv .v{font-family:var(--mono)}
+.kv .v em{font-style:normal;color:var(--red2);font-weight:700}
+
+/* ---------- §03 漏斗 ---------- */
+.funnel-wrap{display:grid;grid-template-columns:1.2fr .9fr;gap:36px;align-items:center}
+@media(max-width:900px){.funnel-wrap{grid-template-columns:1fr}}
+.fstage{display:flex;align-items:center;gap:18px;margin:10px 0}
+.fbar{height:58px;border-radius:10px;display:flex;align-items:center;padding:0 20px;gap:14px;
+  border:1px solid var(--line2);background:linear-gradient(90deg,#1a2233,#141a28);flex:none;position:relative;overflow:hidden}
+.fbar .n{font-family:var(--mono);font-weight:700;font-size:clamp(17px,2vw,22px);font-variant-numeric:tabular-nums}
+.fbar .d{font-size:12px;color:var(--muted);white-space:nowrap}
+.fbar::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(229,72,77,.07))}
+.fbar.hot{border-color:rgba(229,72,77,.5);background:linear-gradient(90deg,rgba(229,72,77,.16),#141a28)}
+.farrow{color:var(--dim);font-family:var(--mono);font-size:15px;padding-left:8px}
+.facts li{font-size:14px;color:var(--muted);padding:9px 0;border-top:1px solid var(--line);list-style:none;display:flex;gap:10px}
+.facts li:first-child{border-top:none}
+.facts b{color:var(--text);font-weight:600}
+.facts .ico{color:var(--red);font-family:var(--mono);flex:none}
+
+/* ---------- §04 双层指标 ---------- */
+.split{display:grid;grid-template-columns:1fr auto 1.35fr;gap:22px;align-items:center}
+@media(max-width:900px){.split{grid-template-columns:1fr}.split-arrow{transform:rotate(90deg);margin:0 auto}}
+.old-metric{background:var(--card);border:1px dashed var(--line2);border-radius:14px;padding:24px;opacity:.85}
+.old-metric .t{font-size:15.5px;font-weight:700;margin-bottom:8px;text-decoration:line-through;
+  text-decoration-color:var(--red);text-decoration-thickness:2px}
+.old-metric p{font-size:13px;color:var(--dim)}
+.split-arrow{color:var(--red);font-size:26px;font-family:var(--mono);text-align:center}
+.layer{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px;margin-bottom:14px}
+.layer:last-child{margin-bottom:0}
+.layer .hd{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.layer .hd .t{font-size:16px;font-weight:700}
+.pill{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;padding:2px 9px;border-radius:999px;
+  background:var(--red-soft);color:var(--red2);border:1px solid rgba(229,72,77,.3)}
+.pill.g{background:rgba(217,164,65,.1);color:var(--gold);border-color:rgba(217,164,65,.3)}
+.layer p{font-size:13.5px;color:var(--muted)}
+.layer p code{font-family:var(--mono);font-size:12px;color:var(--text)}
+
+/* ---------- §05 结果 ---------- */
+.charts{display:grid;grid-template-columns:1.35fr 1fr;gap:16px}
+@media(max-width:960px){.charts{grid-template-columns:1fr}}
+.chart{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px}
+.chart h4{font-size:15px;margin-bottom:2px}
+.chart .sub{font-size:12px;color:var(--dim);font-family:var(--mono);margin-bottom:18px}
+.brow{margin:15px 0}
+.brow .top{display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px}
+.brow .top .name{color:var(--muted)}
+.brow .top .vals{font-family:var(--mono);font-size:12.5px}
+.brow .top .vals .a{color:var(--dim)}
+.brow .top .vals .b{color:var(--red2);font-weight:700}
+.track{position:relative;height:26px;background:#0e131d;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.track .base,.track .ft{position:absolute;top:0;bottom:0;border-radius:5px}
+.track .base{background:var(--gray-bar);width:0;transition:width 1.1s cubic-bezier(.2,.7,.2,1)}
+.track .ft{background:linear-gradient(90deg,rgba(229,72,77,.55),var(--red));width:0;top:0;height:12px;
+  transition:width 1.3s .25s cubic-bezier(.2,.7,.2,1);box-shadow:0 0 18px -4px rgba(229,72,77,.5)}
+.legend{display:flex;gap:18px;margin-top:16px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+.legend i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.err-comp{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px}
+.stack{display:flex;height:34px;border-radius:8px;overflow:hidden;margin-top:14px;border:1px solid var(--line)}
+.stack div{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11.5px;
+  color:#fff;white-space:nowrap;min-width:0;transition:flex-grow 1.2s cubic-bezier(.2,.7,.2,1)}
+.smoke-note{margin-top:16px;font-size:13.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+.smoke-note b{color:var(--text)}
+
+/* ---------- §06 案例 ---------- */
+.case-brief{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 26px;
+  margin-bottom:18px;display:flex;gap:16px;align-items:flex-start}
+.case-brief .mark{flex:none;width:40px;height:40px;border:2px solid var(--gold);border-radius:9px;
+  color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800}
+.case-brief p{font-size:15px;color:var(--muted)}
+.case-brief b{color:var(--text)}
+.duel{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.duel{grid-template-columns:1fr}}
+.duel-card{border-radius:14px;padding:24px;border:1px solid var(--line);background:var(--card);position:relative}
+.duel-card.right{border-color:rgba(76,195,138,.35);background:linear-gradient(180deg,rgba(76,195,138,.05),var(--card))}
+.duel-card .model{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.06em}
+.duel-card .cite{font-size:19px;font-weight:800;margin:10px 0 4px;font-family:var(--mono)}
+.duel-card.right .cite{color:var(--green)}
+.duel-card.wrong .cite{color:var(--red2)}
+.duel-card .desc{font-size:13.5px;color:var(--muted)}
+.badge-r{position:absolute;top:20px;right:20px;font-family:var(--mono);font-size:12px;color:var(--green)}
+.badge-w{position:absolute;top:20px;right:20px;font-family:var(--mono);font-size:12px;color:var(--red2)}
+.case-insight{margin-top:18px;border-left:2px solid var(--gold);background:rgba(217,164,65,.07);
+  padding:14px 22px;border-radius:0 10px 10px 0;font-size:14px;color:var(--muted)}
+.case-insight b{color:var(--gold)}
+
+/* ---------- §07 部署 ---------- */
+.deploy{display:grid;grid-template-columns:1.25fr .9fr;gap:16px}
+@media(max-width:900px){.deploy{grid-template-columns:1fr}}
+.terminal{background:#0a0d13;border:1px solid var(--line2);border-radius:14px;overflow:hidden;
+  box-shadow:0 24px 60px -30px rgba(0,0,0,.7)}
+.term-bar{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);background:#0e1219}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+.term-title{margin-left:8px;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.term-body{padding:20px 22px;font-family:var(--mono);font-size:13px;line-height:1.95;overflow-x:auto}
+.term-body .p{color:var(--red2)}
+.term-body .k{color:var(--muted)}
+.term-body .v{color:var(--text);font-weight:600}
+.term-body .warn{color:var(--gold)}
+.term-body .ok{color:var(--green)}
+.cursor{display:inline-block;width:8px;height:15px;background:var(--red2);vertical-align:-2px;
+  animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.lat-cards{display:grid;gap:14px}
+.lat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;
+  display:flex;justify-content:space-between;align-items:center}
+.lat .k{font-size:13.5px;color:var(--muted)}
+.lat .k small{display:block;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.lat .v{font-family:var(--mono);font-size:21px;font-weight:700}
+.honest{margin-top:16px;background:var(--card);border:1px solid rgba(217,164,65,.28);border-radius:12px;padding:18px 22px}
+.honest .t{font-size:13.5px;font-weight:700;color:var(--gold);margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.honest p{font-size:13px;color:var(--muted)}
+.honest code{font-family:var(--mono);font-size:12px;color:var(--text)}
+
+/* ---------- §08 边界与路线 ---------- */
+.bounds{display:grid;grid-template-columns:1fr 1.25fr;gap:16px}
+@media(max-width:900px){.bounds{grid-template-columns:1fr}}
+.limit-chip{display:flex;gap:12px;padding:13px 0;border-top:1px solid var(--line);font-size:13.5px;
+  color:var(--muted);align-items:baseline}
+.limit-chip:first-of-type{border-top:none}
+.limit-chip .no{font-family:var(--mono);color:var(--dim);font-size:12px;flex:none}
+.roadmap{list-style:none}
+.roadmap li{display:flex;gap:14px;padding:13px 0;border-top:1px solid var(--line);align-items:baseline}
+.roadmap li:first-child{border-top:none}
+.pr{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:5px;flex:none;
+  background:var(--red-soft);color:var(--red2);border:1px solid rgba(229,72,77,.3)}
+.pr.p1{background:rgba(217,164,65,.09);color:var(--gold);border-color:rgba(217,164,65,.3)}
+.pr.p2{background:var(--surface);color:var(--dim);border-color:var(--line2)}
+.roadmap .t{font-size:14.5px;font-weight:600}
+.roadmap .d{font-size:12.5px;color:var(--dim)}
+
+/* ---------- Footer ---------- */
+footer{border-top:1px solid var(--line);padding:64px 0 44px;background:var(--bg2)}
+.foot{display:flex;gap:34px;align-items:flex-start;flex-wrap:wrap}
+.seal{width:74px;height:74px;border:3px solid var(--red);border-radius:10px;color:var(--red);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:22px;
+  font-weight:800;letter-spacing:.05em;transform:rotate(-4deg);flex:none;
+  box-shadow:inset 0 0 0 1.5px rgba(229,72,77,.35)}
+.foot-info{flex:1;min-width:240px}
+.foot-info .name{font-size:17px;font-weight:700;margin-bottom:4px}
+.foot-info .sub{font-size:13px;color:var(--dim);margin-bottom:14px}
+.foot-links{display:flex;flex-wrap:wrap;gap:10px}
+.foot-links a{font-family:var(--mono);font-size:12px;color:var(--muted);text-decoration:none;
+  border:1px solid var(--line2);padding:5px 13px;border-radius:7px;transition:.2s}
+.foot-links a:hover{color:var(--red2);border-color:var(--red)}
+.credits{margin-top:30px;padding-top:20px;border-top:1px solid var(--line);display:flex;
+  justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--dim);font-family:var(--mono)}
+
+/* ---------- 动效 ---------- */
+body.js .reveal{opacity:0;transform:translateY(26px);
+  transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0ms)}
+body.js .reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  body.js .reveal{opacity:1;transform:none;transition:none}
+  .scroll-hint{animation:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<nav>
+  <div class="nav-in">
+    <div class="brand"><span class="seal-mini">引</span>法律问答 · LoRA 微调</div>
+    <div class="nav-links">
+      <a href="#s1">决策</a><a href="#s2">流程</a><a href="#s3">数据</a><a href="#s4">评测</a>
+      <a href="#s5">结果</a><a href="#s6">案例</a><a href="#s7">部署</a><a href="#s8">路线</a>
+    </div>
+    <a class="nav-gh" href="https://github.com/sunnyingyang-cpu/legal-qa-sft" target="_blank" rel="noopener">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      GitHub</a>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-grid-bg"></div>
+  <div class="hero-bg-cite">
+    <span>《中华人民共和国刑法》第三百四十四条　危害国家重点保护植物罪</span>
+    <span>《中华人民共和国民法典》第一千二百五十四条　高空抛物责任</span>
+    <span>《中华人民共和国刑事诉讼法》第五十五条　证据裁判原则</span>
+  </div>
+  <div class="wrap" style="position:relative">
+    <div class="hero-eyebrow reveal">PROJECT SHOWCASE · LLM FINE-TUNING &amp; EVALUATION</div>
+    <h1 class="reveal" style="--d:80ms">教会小模型，<br>有据可依地回答<span class="hl">法律问题</span></h1>
+    <p class="hero-sub reveal" style="--d:160ms">
+      以 <code>Qwen2.5-1.5B-Instruct</code> 为基座、5,000 条指令做 LoRA 微调，在单张
+      Tesla T4 上走完「数据构建 → 训练诊断 → 双层引用评测 → GGUF 量化部署」的完整闭环，
+      并把业界单一的引用准确率拆解为<b style="color:var(--text)">可分别归因的两层</b>。
+    </p>
+    <div class="hero-chips reveal" style="--d:240ms">
+      <span class="chip">LoRA r=32 · fp16</span><span class="chip">5,000 指令 · 3 epochs</span>
+      <span class="chip">单张 T4 · 3.5 GPU·h</span><span class="chip">GGUF Q8_0 · 边缘可部署</span>
+      <span class="chip">MIT · 全程可复现</span>
+    </div>
+    <div class="metrics">
+      <div class="metric reveal" style="--d:300ms"><div class="num"><span data-count="97.0" data-dec="1">0</span><small>%</small></div><div class="lab">引用格式合规率</div><div class="delta">基座 56.3% <b>↑ 40.7pt</b></div></div>
+      <div class="metric reveal" style="--d:380ms"><div class="num"><span data-count="67.5" data-dec="1">0</span><small>%</small></div><div class="lab">引用事实正确率</div><div class="delta">基座 2.3% <b>↑ 65.2pt</b></div></div>
+      <div class="metric reveal" style="--d:460ms"><div class="num"><span data-count="97.1" data-dec="1">0</span><small>tok/s</small></div><div class="lab">解码吞吐（T4 实测）</div><div class="delta">TTFT 均值 0.068s</div></div>
+      <div class="metric reveal" style="--d:540ms"><div class="num"><span data-count="1.6" data-dec="1">0</span><small>GB</small></div><div class="lab">部署体积（Q8_0）</div><div class="delta">7B 方案约 8GB</div></div>
+    </div>
+  </div>
+  <div class="scroll-hint">SCROLL<span style="font-size:16px">↓</span></div>
+</header>
+
+<main>
+<!-- ============ §01 决策 ============ -->
+<section id="s1">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 01 · THE TRADE-OFF</div>
+    <h2 class="reveal">为什么是 1.5B，而不是 7B</h2>
+    <p class="lead reveal">放弃 7B 不是算力妥协，而是一次<b>显式的工程取舍</b>：当预算只有一块 T4，
+      问题从"怎么把 7B 塞进去"变成"在边界内把每一步做到最好、并把边界本身量化出来"。</p>
+    <div class="vs">
+      <div class="vs-card reveal">
+        <div class="vs-head"><span class="t">7B + QLoRA</span><span class="tag ref">对照配方</span></div>
+        <div class="vs-sub">企业级原配方 · 4-bit 量化训练</div>
+        <div class="vs-row"><span class="k">训练显存</span><span class="v bad">~10G（4-bit 压缩后）</span></div>
+        <div class="vs-row"><span class="k">T4 训练 5k 样本</span><span class="v bad">不可行 · OOM</span></div>
+        <div class="vs-row"><span class="k">部署体积</span><span class="v bad">~8 GB</span></div>
+        <div class="vs-row"><span class="k">解码速度</span><span class="v bad">~40 tok/s（文献量级）</span></div>
+      </div>
+      <div class="vs-card win reveal" style="--d:120ms">
+        <div class="vs-head"><span class="t">1.5B + bf16 LoRA</span><span class="tag adopt">本方案 · 采用</span></div>
+        <div class="vs-sub">无需量化训练 · 全部数字为实测</div>
+        <div class="vs-row"><span class="k">训练显存</span><span class="v good">~9G（bf16 免量化）</span></div>
+        <div class="vs-row"><span class="k">T4 训练 5k 样本</span><span class="v good">2h 28m · 实测</span></div>
+        <div class="vs-row"><span class="k">部署体积</span><span class="v good">1.6 GB · 笔记本可跑</span></div>
+        <div class="vs-row"><span class="k">解码速度</span><span class="v good">97.1 tok/s · 实测</span></div>
+      </div>
+    </div>
+    <div class="verdict reveal">取舍的代价也如实量化：1.5B 的<b>法律知识容量弱于 7B</b>——本文不试图证明它能替代 7B，
+      而是用双层评测把"微调教会了什么、教会不了什么"分别度量出来（见 §04–§06）。</div>
+  </div>
+</section>
+
+<!-- ============ §02 流程 ============ -->
+<section id="s2">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 02 · THE PIPELINE</div>
+    <h2 class="reveal">全流程四段流水线 <span class="en">DATA → TRAIN → EVAL → SERVE</span></h2>
+    <p class="lead reveal">两条贯穿原则：<b>冒烟先行</b>——用 0.5B + 500 条 + 2 分钟先打通全链路，
+      把环境坑消灭在最便宜的实验上，正式训练 2.5 小时零意外；<b>每个结论都有对照</b>——
+      基座 zero-shot 与微调模型同脚本、同口径、同测试集。</p>
+    <div class="pipe">
+      <div class="stage reveal"><div class="no">STAGE 1</div><div class="t">数据构建</div>
+        <ul><li>DISC-Law-SFT 16.7 万条</li><li>清洗 + 问题级去重防泄漏</li><li>5,000 / 300 / 300 分层切分</li><li>测试集引用覆盖 100%</li></ul></div>
+      <div class="stage reveal" style="--d:90ms"><div class="no">STAGE 2</div><div class="t">训练</div>
+        <ul><li>0.5B 冒烟 2min 验链路</li><li>1.5B LoRA r=32 α=64</li><li>lr 2e-4 · cosine · 3ep</li><li>fp16 · gradient ckpt</li></ul></div>
+      <div class="stage reveal" style="--d:180ms"><div class="no">STAGE 3</div><div class="t">评测</div>
+        <ul><li>双层引用指标（§04）</li><li>ROUGE / BLEU / BERTScore</li><li>基线 vs 微调对照</li><li>错误构成 + 案例归因</li></ul></div>
+      <div class="stage reveal" style="--d:270ms"><div class="no">STAGE 4</div><div class="t">部署</div>
+        <ul><li>LoRA merge 回基座</li><li>GGUF Q8_0 · 1.6GB</li><li>llama-server OpenAI API</li><li>TTFT / 吞吐 / P95 压测</li></ul></div>
+    </div>
+    <div class="diag">
+      <div class="diag-card reveal">
+        <h4>训练诊断 · eval_loss 的 U 型曲线</h4>
+        <div class="sub">300 条验证集 · 每 epoch 评估一次</div>
+        <svg viewBox="0 0 520 190" width="100%" role="img" aria-label="eval_loss U 型曲线">
+          <line x1="46" y1="160" x2="500" y2="160" stroke="var(--line2)"/>
+          <line x1="46" y1="14" x2="46" y2="160" stroke="var(--line2)"/>
+          <text x="30" y="34" fill="var(--dim)" font-size="10" font-family="var(--mono)">0.532</text>
+          <text x="30" y="118" fill="var(--dim)" font-size="10" font-family="var(--mono)">0.501</text>
+          <path d="M 110 38 C 190 38 210 124 270 124 C 330 124 350 84 430 84" fill="none" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="46" y1="124" x2="270" y2="124" stroke="var(--line2)" stroke-dasharray="4 5"/>
+          <circle cx="110" cy="38" r="4.5" fill="var(--bg)" stroke="var(--muted)" stroke-width="2"/>
+          <circle cx="270" cy="124" r="6" fill="var(--red)"><animate attributeName="r" values="6;8;6" dur="2.4s" repeatCount="indefinite"/></circle>
+          <circle cx="430" cy="84" r="4.5" fill="var(--bg)" stroke="var(--muted)" stroke-width="2"/>
+          <text x="98" y="24" fill="var(--muted)" font-size="11" font-family="var(--mono)">ep1 · 0.5324</text>
+          <text x="246" y="148" fill="var(--red2)" font-size="11.5" font-weight="700" font-family="var(--mono)">ep2 · 0.5008 ★</text>
+          <text x="408" y="70" fill="var(--muted)" font-size="11" font-family="var(--mono)">ep3 · 0.5088</text>
+          <text x="466" y="176" fill="var(--dim)" font-size="10" font-family="var(--mono)">epoch</text>
+          <text x="16" y="176" fill="var(--dim)" font-size="10" font-family="var(--mono)">loss</text>
+        </svg>
+        <div class="note">epoch 2 触底、epoch 3 回升 +1.6% —— 小指令集上的轻微过拟合信号。
+          <b style="color:var(--text)">checkpoint-626（ep2）保留用于对照</b>；结论：5k 规模下 2 epochs 已接近该模型最优。</div>
+      </div>
+      <div class="diag-card reveal" style="--d:120ms">
+        <h4>训练账单</h4>
+        <div class="sub">全部为 Colab T4 实测</div>
+        <div class="kv"><span class="k">正式训练</span><span class="v">2h 27m · <em>1.69 samples/s</em></span></div>
+        <div class="kv"><span class="k">批量推理（×2 模型 ×300 条）</span><span class="v">~43 min</span></div>
+        <div class="kv"><span class="k">数据构建 + 评测 + 导出</span><span class="v">~25 min</span></div>
+        <div class="kv"><span class="k">全流程 GPU 合计</span><span class="v"><em>≈ 3.5 h · 0 成本</em></span></div>
+        <div class="kv"><span class="k">train_loss</span><span class="v">0.857 → 0.407</span></div>
+        <div class="note" style="margin-top:12px">冒烟先行节省的是<b style="color:var(--text)">风险成本</b>：
+          所有环境问题（模板、精度、路径）都在 2 分钟的 0.5B 实验里暴露并修复。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ §03 数据 ============ -->
+<section id="s3">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 03 · THE FUNNEL</div>
+    <h2 class="reveal">数据工程 <span class="en">16.7 万条到 5,600 条</span></h2>
+    <p class="lead reveal">评测数字可信的前提是数据干净：去重防泄漏、测试集可计算、抽样可复现——
+      三件事在漏斗里一次做完。</p>
+    <div class="funnel-wrap">
+      <div class="reveal">
+        <div class="fstage">
+          <div class="fbar" style="width:min(100%,520px)"><span class="n" data-count="166758">0</span><span class="d">DISC-Law-SFT 原始 · 347MB</span></div>
+        </div>
+        <div class="farrow">↓　长度过滤（问 10–512 / 答 20–1200 字）+ 去重</div>
+        <div class="fstage">
+          <div class="fbar" style="width:min(66%,344px)"><span class="n" data-count="64361">0</span><span class="d">清洗后 · 17.9% 带法条引用</span></div>
+        </div>
+        <div class="farrow">↓　分层抽样 · 单类别 ≤40% · seed=42</div>
+        <div class="fstage">
+          <div class="fbar hot" style="width:min(40%,208px)"><span class="n">5,600</span><span class="d">5,000 / 300 / 300</span></div>
+        </div>
+      </div>
+      <ul class="facts reveal" style="--d:140ms">
+        <li><span class="ico">①</span><span><b>问题级去重防泄漏</b>：NFKC 归一化 → 去标点 → MD5，同题仅留一条，训练/测试天然隔离，杜绝"背答案"。</span></li>
+        <li><span class="ico">②</span><span><b>测试集引用覆盖率 100%</b>：验证/测试集优先保留答案带《法律名》第X条引用的样本——引用指标才可计算。</span></li>
+        <li><span class="ico">③</span><span><b>确定性可复现</b>：seed=42 + 脚本化构建，任何人重跑得到同一份数据。</span></li>
+        <li><span class="ico">④</span><span><b>诚实标注</b>：语料实为判决预测 / 司法考试 / 咨询的<b>任务混态</b>（无类别字段），指标解读基于这一事实。</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ §04 评测 ============ -->
+<section id="s4">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 04 · THE TWO-LAYER METRIC</div>
+    <h2 class="reveal">把"引用准确率"拆成两层</h2>
+    <p class="lead reveal">业界惯用单一 Citation Accuracy，把<b>"会不会引用"</b>和<b>"引得对不对"</b>混为一谈。
+      拆成两层之后，微调的价值与模型的边界<b>同时变得可度量</b>——这是本项目最核心的方法改进。</p>
+    <div class="split">
+      <div class="old-metric reveal">
+        <div class="t">Citation Accuracy</div>
+        <p>单一数值。格式学会了、事实没学会，两种情况在这个指标里无法区分——小模型微调最需要回答的问题，恰恰被它藏住了。</p>
+      </div>
+      <div class="split-arrow reveal" style="--d:80ms">拆解 ⟶</div>
+      <div class="reveal" style="--d:140ms">
+        <div class="layer">
+          <div class="hd"><span class="t">引用格式合规率</span><span class="pill g">度量「作答规范」</span></div>
+          <p>参考答案带引用时，预测也给出 <code>《法律名》第X条</code> 形式引用的比例。<br>回答的是：<b style="color:var(--text)">微调是否教会了模型"怎么答"</b></p>
+        </div>
+        <div class="layer">
+          <div class="hd"><span class="t">引用事实正确率</span><span class="pill">度量「知识检索精度」</span></div>
+          <p>预测引用的法条集合与参考答案的重合度（Precision / Recall / 完全一致）。<br>回答的是：<b style="color:var(--text)">模型"引的对不对"——受预训练知识边界约束</b></p>
+        </div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <p class="note reveal">配套口径：同脚本（eval/metrics.py）· 字符级 ROUGE-L / BLEU + BERTScore + 引用正则抽取 ·
+      同 300 条 held-out 测试集。LLM-as-Judge 因无外部 API 预算列为升级项（§08）。</p>
+  </div>
+</section>
+
+<!-- ============ §05 结果 ============ -->
+<section id="s5">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 05 · THE EVIDENCE</div>
+    <h2 class="reveal">实验结果 <span class="en">BASELINE → FINE-TUNED</span></h2>
+    <p class="lead reveal">全部指标来自同一测试集的两次推理：<b>基座 zero-shot</b> vs <b>微调后</b>（epoch 3）。</p>
+    <div class="charts">
+      <div class="chart reveal">
+        <h4>引用与语义指标</h4><div class="sub">unit: % · baseline → fine-tuned</div>
+        <div class="brow"><div class="top"><span class="name">引用格式合规率</span><span class="vals"><span class="a">56.3</span> → <span class="b">97.0</span></span></div>
+          <div class="track"><div class="base" data-w="56.3"></div><div class="ft" data-w="97"></div></div></div>
+        <div class="brow"><div class="top"><span class="name">引用事实正确率 P</span><span class="vals"><span class="a">2.3</span> → <span class="b">67.5</span></span></div>
+          <div class="track"><div class="base" data-w="2.3"></div><div class="ft" data-w="67.5"></div></div></div>
+        <div class="brow"><div class="top"><span class="name">引用完全一致率</span><span class="vals"><span class="a">1.7</span> → <span class="b">60.3</span></span></div>
+          <div class="track"><div class="base" data-w="1.7"></div><div class="ft" data-w="60.3"></div></div></div>
+        <div class="brow"><div class="top"><span class="name">BERTScore F1</span><span class="vals"><span class="a">74.2</span> → <span class="b">82.2</span></span></div>
+          <div class="track"><div class="base" data-w="74.2"></div><div class="ft" data-w="82.2"></div></div></div>
+        <div class="legend"><span><i style="background:var(--gray-bar)"></i>基座 zero-shot</span><span><i style="background:var(--red)"></i>微调后</span></div>
+      </div>
+      <div>
+        <div class="chart reveal" style="--d:100ms">
+          <h4>生成质量</h4><div class="sub">unit: score / 60 · baseline → fine-tuned</div>
+          <div class="brow"><div class="top"><span class="name">ROUGE-L</span><span class="vals"><span class="a">32.4</span> → <span class="b">49.4</span></span></div>
+            <div class="track"><div class="base" data-w="54"></div><div class="ft" data-w="82.3"></div></div></div>
+          <div class="brow"><div class="top"><span class="name">BLEU（字符级）</span><span class="vals"><span class="a">30.2</span> → <span class="b">47.4</span></span></div>
+            <div class="track"><div class="base" data-w="50.3"></div><div class="ft" data-w="79"></div></div></div>
+          <div class="legend"><span><i style="background:var(--gray-bar)"></i>基座</span><span><i style="background:var(--red)"></i>微调后</span></div>
+        </div>
+        <div class="err-comp reveal" style="--d:180ms">
+          <h4 style="font-size:15px">300 条测试集 · 引用构成</h4>
+          <div class="stack">
+            <div style="background:#3f8f66;flex:60.3">完全一致 181 · 60.3%</div>
+            <div style="background:#8f5a3f;flex:36.7">有出入 110 · 36.7%</div>
+            <div style="background:#3a4356;flex:3">9</div>
+          </div>
+          <p class="note" style="margin-top:10px">「有出入」的构成见 §06 案例归因——其中一部分其实是<b style="color:var(--text)">评测集自身的标签噪声</b>。</p>
+        </div>
+      </div>
+    </div>
+    <div class="smoke-note reveal"><b>规模信号（0.5B 冒烟对照）</b>：0.5B 仅用 500 条训练 1 epoch，
+      引用格式合规率即达 <b class="mono" style="color:var(--red2)">76.7%</b>（格式极易习得），
+      而事实正确率只有 <b class="mono">41.7%</b>（事实层依赖规模与数据量）——两层指标的分离再次得到印证。</div>
+  </div>
+</section>
+
+<!-- ============ §06 案例 ============ -->
+<section id="s6">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 06 · THE CASE STUDY</div>
+    <h2 class="reveal">同一案情，两个模型 <span class="en">相邻条文混淆现场</span></h2>
+    <div class="case-brief reveal">
+      <div class="mark">案</div>
+      <p><b>案情：</b>被告人得知红豆杉具有防癌功效，与其姑父商量后在其山林内砍伐 3 棵红豆杉并运往县城加工家具。
+        经鉴定，涉案红豆杉均属<b>国家Ⅰ级重点保护植物</b>。问：可能构成何罪？</p>
+    </div>
+    <div class="duel">
+      <div class="duel-card wrong reveal">
+        <span class="badge-w">✗ 引错相邻条文</span>
+        <div class="model">Qwen2.5-0.5B · 冒烟（500 条 / 1 epoch）</div>
+        <div class="cite">《刑法》第三百四十五条</div>
+        <div class="desc">盗伐林木罪——针对"林木"的一般条款。事实理解正确，条文检索偏了一条。</div>
+      </div>
+      <div class="duel-card right reveal" style="--d:120ms">
+        <span class="badge-r">✓ 引对具体条文</span>
+        <div class="model">Qwen2.5-1.5B · 正式微调（5,000 条 / 3 epochs）</div>
+        <div class="cite">《刑法》第三百四十四条</div>
+        <div class="desc">危害国家重点保护植物罪——针对"重点保护植物"的特别条款，与参考答案一致。</div>
+      </div>
+    </div>
+    <div class="case-insight reveal">这是"相邻条文混淆"的典型现场——小模型<b>知道发生了什么，却在相邻规范域间选错</b>。
+      它是 §05 中 36.7%「有出入」错误的主体，也是 §08 把 <b>RAG 注入法条库</b>排在路线图第一位的原因。</div>
+    <div class="case-brief reveal" style="margin-top:18px">
+      <div class="mark" style="border-color:var(--gold);color:var(--gold)">鉴</div>
+      <p><b>另一类"错误"其实是评测集的错：</b>一条涉外民事行为能力题，参考答案引用了<b>《中华人民共和国民事法》第9条</b>
+        ——这是一部不存在的法律。标签噪声意味着 <b class="mono">67.5%</b> 的事实正确率<b>被低估</b>，
+        "评测集净化"因此进入路线图。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ §07 部署 ============ -->
+<section id="s7">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 07 · IN PRODUCTION</div>
+    <h2 class="reveal">量化部署与压测 <span class="en">GGUF · llama.cpp · 30 QUERY LOAD TEST</span></h2>
+    <p class="lead reveal">LoRA 合并 → GGUF Q8_0（<b>1.6GB，几乎无损</b>）→ llama-server 提供 OpenAI 兼容 API，
+      附带 Gradio 前端。以下为 T4（CUDA 版 llama.cpp）30 条真实压测。</p>
+    <div class="deploy">
+      <div class="terminal reveal">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="term-title">benchmark_latency.py — qwen2.5-1.5b-legal.Q8_0.gguf</span></div>
+        <div class="term-body">
+<span class="p">$</span> python deploy/benchmark_latency.py --model ...Q8_0.gguf -n 30 --n-gpu-layers -1<br>
+<span class="k">ttft_mean_s</span>        = <span class="v">0.068</span>    <span class="k">ttft_p95_s</span>  = <span class="v">0.104</span><br>
+<span class="k">decode_tok_s_mean</span> = <span class="v">97.1</span>     <span class="k">range</span>       = <span class="v">94 – 104</span><br>
+<span class="k">e2e_mean_s</span>        = <span class="v">2.277</span>    <span class="k">e2e_p95_s</span>   = <span class="warn">2.78</span>  <span class="k"># 目标 &lt; 2s：未达标</span><br>
+<span class="ok">✓ 根因明确</span> <span class="k"># 256 tok ÷ 97 tok/s ≈ 2.6s，解码时长主导，与加载/调度无关</span><br>
+<span class="ok">✓ 修复路径</span> <span class="k"># 限长 150tok ≈1.6s 达标 · 流式(TTFT 0.07s) · Q4_K_M 再提速~40%</span> <span class="cursor"></span>
+        </div>
+      </div>
+      <div class="lat-cards">
+        <div class="lat reveal" style="--d:100ms"><div class="k">首 token 延迟<small>TTFT · mean / P95</small></div><div class="v" style="color:var(--red2)">0.07<small style="font-size:.55em">s</small></div></div>
+        <div class="lat reveal" style="--d:170ms"><div class="k">解码吞吐<small>tok/s · CUDA on T4</small></div><div class="v">97.1</div></div>
+        <div class="lat reveal" style="--d:240ms"><div class="k">部署体积<small>GGUF Q8_0 · 近无损</small></div><div class="v">1.6<small style="font-size:.55em">GB</small></div></div>
+        <div class="honest reveal" style="--d:310ms">
+          <div class="t">⚖ 未达标也要写清楚</div>
+          <p>P95 端到端 2.78s &gt; 2s 目标。根因是<b style="color:var(--text)">解码时长主导</b>而非服务瓶颈，
+            三条修复路径均有量化预期——<b style="color:var(--text)">诚实的失败分析比漂亮的数字更可信</b>。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ §08 边界与路线 ============ -->
+<section id="s8">
+  <div class="wrap">
+    <div class="eyebrow reveal">§ 08 · BOUNDARIES &amp; ROADMAP</div>
+    <h2 class="reveal">已知边界，与下一步 <span class="en">WHAT'S NEXT</span></h2>
+    <div class="bounds">
+      <div class="card reveal">
+        <h4 style="font-size:15px;margin-bottom:12px">已知边界 <span class="en" style="font-size:10px">LIMITS</span></h4>
+        <div class="limit-chip"><span class="no">L1</span><span>知识检索精度天花板：相邻条文混淆是 1.5B 参数量下的硬边界，继续调参收益有限</span></div>
+        <div class="limit-chip"><span class="no">L2</span><span>任务混态：判决预测 / 法考 / 咨询混合训练，指标暂无法按任务分层归因</span></div>
+        <div class="limit-chip"><span class="no">L3</span><span>引用指标盲区：测不出选项/推理层面的对错，需 LLM-as-Judge 补齐</span></div>
+        <div class="limit-chip"><span class="no">L4</span><span>评测集标签噪声：部分"错误"来自参考答案本身，真实事实正确率被低估</span></div>
+      </div>
+      <div class="card reveal" style="--d:120ms">
+        <h4 style="font-size:15px;margin-bottom:12px">路线图 <span class="en" style="font-size:10px">PRIORITIZED</span></h4>
+        <ul class="roadmap">
+          <li><span class="pr">P0</span><span><span class="t">RAG 注入法条库</span><br><span class="d">直接攻击相邻条文混淆——预期收益大于一切调参</span></span></li>
+          <li><span class="pr p1">P1</span><span><span class="t">评测集净化</span><br><span class="d">人工复核 110 条「有出入」，拆分模型错 vs 标签错</span></span></li>
+          <li><span class="pr p1">P1</span><span><span class="t">LLM-as-Judge</span><br><span class="d">覆盖引用指标测不到的推理正确性</span></span></li>
+          <li><span class="pr p2">P2</span><span><span class="t">对照实验组</span><br><span class="d">ep2 vs ep3 · 任务分层评测 · 自建法条 QA · Q4/vLLM</span></span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="seal">YYJ</div>
+      <div class="foot-info">
+        <div class="name">法律问答 · Qwen2.5-1.5B LoRA 微调</div>
+        <div class="sub">Project showcase · 数据构建 → 训练诊断 → 双层评测 → 量化部署</div>
+        <div class="foot-links">
+          <a href="https://github.com/sunnyingyang-cpu/legal-qa-sft" target="_blank" rel="noopener">GitHub 仓库 ↗</a>
+          <a href="https://github.com/sunnyingyang-cpu/legal-qa-sft/blob/main/colab_run.ipynb" target="_blank" rel="noopener">一键复现 Notebook ↗</a>
+          <a href="https://github.com/sunnyingyang-cpu/legal-qa-sft/blob/main/colab_run_result.ipynb" target="_blank" rel="noopener">完整运行记录 ↗</a>
+          <a href="https://github.com/sunnyingyang-cpu/legal-qa-sft/blob/main/README.md" target="_blank" rel="noopener">完整文档 ↗</a>
+        </div>
+      </div>
+    </div>
+    <div class="credits">
+      <span>Built by YYJ · 单文件 HTML · 手写 SVG · 零依赖</span>
+      <span>Qwen2.5 · LLaMA-Factory · DISC-Law-SFT · llama.cpp · MIT License</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+document.body.classList.add('js');
+
+/* 滚动进度条 */
+const bar=document.getElementById('progress');
+addEventListener('scroll',()=>{const h=document.documentElement;
+  bar.style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%'},{passive:true});
+
+/* 分层入场动画 */
+const io=new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting)return;e.target.classList.add('in');io.unobserve(e.target);
+  /* 柱状图动画 */
+  e.target.querySelectorAll?.('.base,.ft').forEach(el=>requestAnimationFrame(()=>el.style.width=el.dataset.w+'%'));
+  /* 数字滚动 */
+  e.target.querySelectorAll?.('[data-count]').forEach(el=>{
+    const t=parseFloat(el.dataset.count),d=parseInt(el.dataset.dec||0),s=performance.now(),dur=1400;
+    (function tick(now){const p=Math.min((now-s)/dur,1),v=t*(1-Math.pow(1-p,3));
+      el.textContent=v.toFixed(d);if(p<1)requestAnimationFrame(tick)})(s);
+  });
+}),{threshold:.18});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>
