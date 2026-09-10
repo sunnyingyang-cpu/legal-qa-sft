@@ -1,0 +1,31 @@
+# ===== 不入公开仓库的材料 =====
+RESUME.md
+
+# 本地解包与临时分析文件
+_unzip/
+_unzip2/
+_unzip3/
+_ft_cases.json
+_inspect_data.js
+
+# ===== 模型权重与大文件（走 HF Hub / GitHub Release）=====
+saves/
+results/
+models/
+eval_results/
+*.safetensors
+*.gguf
+
+# ===== 数据集全量文件（发布样例 + 构建脚本，保证可复现且符合原数据集许可）=====
+data/legal_qa_train.json
+data/legal_qa_val.json
+data/legal_qa_test.json
+data/legal_qa_robustness.json
+data/robustness_map.json
+
+# ===== Python / 系统 =====
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.zip
+.DS_Store
