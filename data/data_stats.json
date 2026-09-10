@@ -1,0 +1,12 @@
+{
+  "raw": 166758,
+  "cleaned": 64361,
+  "train": 5000,
+  "val": 300,
+  "test": 300,
+  "test_citation_rate": 1.0,
+  "train_top_categories": {
+    "unknown": 5000
+  },
+  "seed": 42
+}

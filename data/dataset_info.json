@@ -1,0 +1,6 @@
+{
+  "legal_qa_train": {"file_name": "legal_qa_train.json"},
+  "legal_qa_val": {"file_name": "legal_qa_val.json"},
+  "legal_qa_test": {"file_name": "legal_qa_test.json"},
+  "legal_qa_robustness": {"file_name": "legal_qa_robustness.json"}
+}
